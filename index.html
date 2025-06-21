@@ -69,17 +69,34 @@
       const fragment = document.createDocumentFragment();
 
       pageProducts.forEach(p => {
-        const paypalLink = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=mr.mohammadodeh1980@gmail.com&item_name=${encodeURIComponent(p["Product Name"])}&amount=${p["Selling Price"]}&currency_code=USD`;
-        
+        // إنشاء وصف PayPal مع كل التفاصيل
+        const notes = [
+          `Variant ID: ${p["Variant ID"]}`,
+          `Product Name: ${p["Product Name"]}`,
+          `Product Type: ${p["Product Type"]}`,
+          `Product Color: ${p["Product Color"] || "N/A"}`,
+          `Product Size: ${p["Product Size"] || "N/A"}`
+        ].join(' | ');
+
+        const paypalLink = `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick` +
+          `&business=mr.mohammadodeh1980@gmail.com` +
+          `&item_name=${encodeURIComponent(p["Product Name"])}` +
+          `&amount=${p["Selling Price"]}` +
+          `&currency_code=USD` +
+          `&custom=${encodeURIComponent(notes)}`;
+
         const productDiv = document.createElement('div');
         productDiv.className = 'product';
+
+        // استخدام عرض صورة مثل PHP لكنه في JS عادي
         productDiv.innerHTML = `
-          <img src="${p["Product Image"]}" alt="${p["Product Name"]}">
+          <img src="${p["Product Image"]}">
           <h3>${p["Product Name"]}</h3>
           <p>${p["Product Type"]} - ${p["Product Color"] || 'No color'} - ${p["Product Size"] || 'No size'}</p>
           <p><strong>$${p["Selling Price"]}</strong></p>
           <a href="${paypalLink}" target="_blank">Buy Now</a>
         `;
+
         fragment.appendChild(productDiv);
       });
 
@@ -104,6 +121,7 @@
       }
     });
 
+    // ربط البيانات من Google Apps Script
     fetch("https://script.google.com/macros/s/AKfycbzsL31K1Hh1LQU1ne12cuD7y0q8imtfWxs3bRxIcIDPrGUNEXjnDH2azTPkfBa3sJ04/exec")
       .then(r => r.json())
       .then(data => {
