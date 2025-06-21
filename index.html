@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f7f7f7;
+    }
+    .product-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .product {
+      width: 250px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    .product img {
+      width: 100%;
+      height: auto;
+      border-radius: 5px;
+    }
+    .pagination {
+      margin-top: 20px;
+      text-align: center;
+    }
+    .pagination button {
+      padding: 8px 12px;
+      margin: 0 5px;
+      border: none;
+      background: #007BFF;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .pagination button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <div class="product-grid" id="productGrid"></div>
+  <div class="pagination">
+    <button id="prevPage">Previous</button>
+    <span id="pageInfo"></span>
+    <button id="nextPage">Next</button>
+  </div>
+
+  <script>
+    let products = [];
+    let currentPage = 1;
+    const itemsPerPage = 20;
+
+    function renderPage() {
+      const grid = document.getElementById('productGrid');
+      grid.innerHTML = '';
+      const start = (currentPage - 1) * itemsPerPage;
+      const end = start + itemsPerPage;
+      const pageProducts = products.slice(start, end);
+
+      const fragment = document.createDocumentFragment();
+
+      pageProducts.forEach(p => {
+        const productDiv = document.createElement('div');
+        productDiv.className = 'product';
+        productDiv.innerHTML = `
+          <img src="${p["Product Image"] || '#'}" alt="${p["Product Name"] || 'No name'}">
+          <h3>${p["Product Name"] || 'No name'}</h3>
+          <p>${p["Product Type"] || ''} - ${p["Product Color"] || 'No color'} - ${p["Product Size"] || 'No size'}</p>
+          <p><strong>${p["Selling Price"] || ''}</strong></p>
+          <a href="${p["Paypal"] || '#'}" target="_blank">Buy Now</a>
+        `;
+        fragment.appendChild(productDiv);
+      });
+
+      grid.appendChild(fragment);
+
+      document.getElementById('pageInfo').innerText = `Page ${currentPage} of ${Math.ceil(products.length / itemsPerPage)}`;
+      document.getElementById('prevPage').disabled = currentPage === 1;
+      document.getElementById('nextPage').disabled = end >= products.length;
+    }
+
+    document.getElementById('prevPage').addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderPage();
+      }
+    });
+
+    document.getElementById('nextPage').addEventListener('click', () => {
+      if (currentPage < Math.ceil(products.length / itemsPerPage)) {
+        currentPage++;
+        renderPage();
+      }
+    });
+
+    fetch("https://script.google.com/macros/s/AKfycbzsL31K1Hh1LQU1ne12cuD7y0q8imtfWxs3bRxIcIDPrGUNEXjnDH2azTPkfBa3sJ04/exec")
+      .then(r => r.json())
+      .then(data => {
+        products = data;
+        renderPage();
+      })
+      .catch(err => {
+        document.getElementById('productGrid').innerText = 'Failed to load products.';
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
