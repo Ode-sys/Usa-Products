@@ -1,0 +1,17 @@
+{
+  "name": "printful-mcp",
+  "version": "1.0.0",
+  "description": "Printful MCP Server for Claude",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "node-fetch": "^3.3.2"
+  }
+}
