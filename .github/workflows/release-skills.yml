@@ -1,0 +1,55 @@
+name: Release Skills Package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.claude/skills/**'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create skills ZIP
+        run: zip -r ode-ai-skills.zip .claude/skills/
+
+      - name: Count skills
+        id: count
+        run: |
+          COUNT=$(find .claude/skills -name 'SKILL.md' | wc -l)
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+      - name: Get timestamp tag
+        id: tag
+        run: echo "tag=skills-$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Ode AI Skills (${{ steps.count.outputs.count }} skills)"
+          body: |
+            ## Ode AI Skills Package
+
+            **${{ steps.count.outputs.count }} Claude Code skills** جاهزة للتثبيت.
+
+            ### التثبيت على Windows (D:\claude-skills)
+
+            **الطريقة السريعة:**
+            1. حمّل `ode-ai-skills.zip`
+            2. فكّه داخل `D:\claude-skills`  
+               (النتيجة: `D:\claude-skills\.claude\skills\...`)
+            3. افتح `D:\claude-skills` في VS Code
+
+            **أو شغّل setup.ps1:**
+            ```
+            Right-click setup.ps1 → Run with PowerShell
+            ```
+          files: ode-ai-skills.zip
+          make_latest: true
