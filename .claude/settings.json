@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "printful": {
+      "command": "node",
+      "args": ["/home/user/Usa-Products/printful-mcp/index.js"],
+      "env": {
+        "PRINTFUL_API_KEY": ""
+      }
+    }
+  }
+}
