@@ -1,0 +1,12 @@
+{
+  "name": "@ode/billing",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@ode/database": "*",
+    "stripe": "^17.4.0"
+  },
+  "devDependencies": { "typescript": "^5.7.3" }
+}

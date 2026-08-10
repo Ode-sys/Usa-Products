@@ -1,0 +1,17 @@
+{
+  "name": "@ode/reporting",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "xlsx": "^0.18.5",
+    "papaparse": "^5.4.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "@types/papaparse": "^5.3.15"
+  }
+}

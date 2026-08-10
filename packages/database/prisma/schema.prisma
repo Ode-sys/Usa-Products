@@ -1,0 +1,904 @@
+// ================================
+// Odé AI Platform — Prisma Schema
+// Multi-Tenant SaaS · PostgreSQL
+// ================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("DATABASE_SHADOW_URL")
+  extensions        = [pgcrypto, uuid_ossp]
+}
+
+// ─── ENUMS ──────────────────────────────────────────────
+
+enum TenantType   { PLATFORM AGENCY CLIENT }
+enum TenantStatus { ACTIVE SUSPENDED PENDING ARCHIVED }
+enum UserStatus   { ACTIVE SUSPENDED PENDING DELETED }
+
+enum MembershipRole {
+  SUPER_ADMIN PLATFORM_ADMIN
+  AGENCY_OWNER AGENCY_ADMIN AGENCY_STAFF
+  CLIENT_ADMIN CLIENT_USER
+  VIEWER BILLING_MANAGER SUPPORT_AGENT
+}
+enum MembershipStatus { ACTIVE INACTIVE PENDING REVOKED }
+
+enum ModuleKey    { CONTENT_AI AMAZON_AI BUSINESS_AI SCHOOL_AI REPORTING_AI }
+enum ModuleStatus { ACTIVE INACTIVE MAINTENANCE }
+enum TenantModuleStatus { ACTIVE INACTIVE TRIAL EXPIRED }
+
+enum BillingInterval    { MONTHLY YEARLY ONE_TIME }
+enum PlanStatus         { ACTIVE INACTIVE ARCHIVED }
+enum SubscriptionStatus { ACTIVE CANCELED PAST_DUE TRIALING PAUSED INCOMPLETE }
+enum BillingProvider    { STRIPE PAYPAL MANUAL }
+enum InvoiceStatus      { DRAFT OPEN PAID VOID UNCOLLECTIBLE }
+
+enum FileStatus     { PENDING PROCESSING READY FAILED DELETED }
+enum AIProvider     { OPENAI ANTHROPIC GOOGLE MISTRAL }
+enum AIRequestStatus { PENDING PROCESSING COMPLETED FAILED RATE_LIMITED }
+enum ReportStatus   { PENDING GENERATING READY FAILED }
+
+enum ContentItemType   { POST SCRIPT REEL EMAIL BLOG AD_COPY STORY }
+enum ContentItemStatus { DRAFT REVIEW APPROVED SCHEDULED PUBLISHED REJECTED ARCHIVED }
+
+enum ContactType   { LEAD CUSTOMER VENDOR PARTNER }
+enum ContactStatus { ACTIVE INACTIVE ARCHIVED }
+enum DealStage     { LEAD QUALIFIED PROPOSAL NEGOTIATION CLOSED_WON CLOSED_LOST }
+enum TaskStatus    { TODO IN_PROGRESS REVIEW DONE CANCELED }
+enum TaskPriority  { LOW MEDIUM HIGH URGENT }
+
+enum AttendanceStatus { PRESENT ABSENT LATE EXCUSED }
+enum PaymentStatus    { PAID UNPAID PARTIAL OVERDUE WAIVED }
+enum NotificationType { INFO SUCCESS WARNING ERROR BILLING SYSTEM }
+
+enum IntegrationProvider { GOOGLE_SHEETS SLACK ZAPIER AMAZON_SP_API META_ADS GOOGLE_ADS }
+enum IntegrationStatus   { CONNECTED DISCONNECTED ERROR PENDING }
+enum AmazonReportType    { SALES INVENTORY ADVERTISING FBA_FEES BUSINESS_REPORT WBR ASIN_PERFORMANCE PROFIT_LOSS }
+enum Gender              { MALE FEMALE OTHER }
+
+// ─── USERS ──────────────────────────────────────────────
+
+model User {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String     @unique @db.VarChar(320)
+  fullName        String     @map("full_name") @db.VarChar(255)
+  avatarUrl       String?    @map("avatar_url")
+  phone           String?    @db.VarChar(50)
+  passwordHash    String?    @map("password_hash")
+  status          UserStatus @default(PENDING)
+  emailVerifiedAt DateTime?  @map("email_verified_at")
+  lastLoginAt     DateTime?  @map("last_login_at")
+  lastLoginIp     String?    @map("last_login_ip") @db.VarChar(45)
+  mfaEnabled      Boolean    @default(false) @map("mfa_enabled")
+  mfaSecret       String?    @map("mfa_secret")
+  preferences     Json       @default("{}") @db.JsonB
+  locale          String     @default("ar") @db.VarChar(10)
+  timezone        String     @default("Asia/Riyadh") @db.VarChar(100)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  deletedAt       DateTime?  @map("deleted_at")
+
+  memberships         Membership[]
+  sessions            UserSession[]
+  passwordResets      PasswordReset[]
+  auditLogs           AuditLog[]          @relation("ActorAuditLogs")
+  uploadedFiles       File[]
+  aiRequests          AIRequest[]
+  createdReports      Report[]
+  notifications       Notification[]
+  assignedTasks       BusinessTask[]      @relation("AssignedTasks")
+  ownedDeals          BusinessDeal[]      @relation("OwnedDeals")
+  createdContentItems ContentItem[]
+  createdDashboards   ReportingDashboard[]
+
+  @@index([email])
+  @@index([status])
+  @@map("users")
+}
+
+model UserSession {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  token        String   @unique @db.VarChar(512)
+  refreshToken String   @unique @map("refresh_token") @db.VarChar(512)
+  expiresAt    DateTime @map("expires_at")
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("user_sessions")
+}
+
+model PasswordReset {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  token     String    @unique @db.VarChar(256)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("password_resets")
+}
+
+// ─── TENANTS ─────────────────────────────────────────────
+
+model Tenant {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String       @db.VarChar(255)
+  slug           String       @unique @db.VarChar(100)
+  type           TenantType   @default(CLIENT)
+  status         TenantStatus @default(PENDING)
+  parentTenantId String?      @map("parent_tenant_id") @db.Uuid
+  logoUrl        String?      @map("logo_url")
+  settings       Json         @default("{}") @db.JsonB
+  metadata       Json         @default("{}") @db.JsonB
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  parent              Tenant?              @relation("TenantHierarchy", fields: [parentTenantId], references: [id])
+  children            Tenant[]             @relation("TenantHierarchy")
+  memberships         Membership[]
+  agencies            Agency[]
+  clients             Client[]
+  tenantModules       TenantModule[]
+  subscriptions       Subscription[]
+  invoices            Invoice[]
+  auditLogs           AuditLog[]
+  files               File[]
+  aiRequests          AIRequest[]
+  reports             Report[]
+  notifications       Notification[]
+  integrations        Integration[]
+  contentProjects     ContentProject[]
+  amazonAccounts      AmazonAccount[]
+  businessContacts    BusinessContact[]
+  businessTasks       BusinessTask[]
+  schoolStudents      SchoolStudent[]
+  reportingDatasets   ReportingDataset[]
+  reportingDashboards ReportingDashboard[]
+
+  @@index([slug])
+  @@index([type])
+  @@index([status])
+  @@index([parentTenantId])
+  @@map("tenants")
+}
+
+model Agency {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String       @map("tenant_id") @db.Uuid
+  name         String       @db.VarChar(255)
+  ownerUserId  String       @map("owner_user_id") @db.Uuid
+  billingEmail String       @map("billing_email") @db.VarChar(320)
+  phone        String?      @db.VarChar(50)
+  website      String?
+  country      String?      @db.VarChar(100)
+  status       TenantStatus @default(ACTIVE)
+  settings     Json         @default("{}") @db.JsonB
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  clients     Client[]
+  memberships Membership[]
+
+  @@index([tenantId])
+  @@map("agencies")
+}
+
+model Client {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String       @map("tenant_id") @db.Uuid
+  agencyId  String?      @map("agency_id") @db.Uuid
+  name      String       @db.VarChar(255)
+  industry  String?      @db.VarChar(100)
+  country   String?      @db.VarChar(100)
+  website   String?
+  status    TenantStatus @default(ACTIVE)
+  settings  Json         @default("{}") @db.JsonB
+  metadata  Json         @default("{}") @db.JsonB
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  agency          Agency?         @relation(fields: [agencyId], references: [id])
+  memberships     Membership[]
+  files           File[]
+  reports         Report[]
+  contentProjects ContentProject[]
+  amazonAccounts  AmazonAccount[]
+  businessContacts BusinessContact[]
+  schoolStudents  SchoolStudent[]
+
+  @@index([tenantId])
+  @@index([agencyId])
+  @@map("clients")
+}
+
+// ─── RBAC ────────────────────────────────────────────────
+
+model Role {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String           @unique @db.VarChar(100)
+  displayName     String           @map("display_name") @db.VarChar(255)
+  displayNameAr   String?          @map("display_name_ar") @db.VarChar(255)
+  description     String?
+  systemRole      Boolean          @default(false) @map("system_role")
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+  memberships     Membership[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key             String           @unique @db.VarChar(200)
+  displayName     String           @map("display_name") @db.VarChar(255)
+  description     String?
+  module          ModuleKey?
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Membership {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String           @map("user_id") @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  agencyId          String?          @map("agency_id") @db.Uuid
+  clientId          String?          @map("client_id") @db.Uuid
+  role              MembershipRole
+  roleId            String?          @map("role_id") @db.Uuid
+  status            MembershipStatus @default(PENDING)
+  invitedBy         String?          @map("invited_by") @db.Uuid
+  invitedAt         DateTime?        @map("invited_at")
+  joinedAt          DateTime?        @map("joined_at")
+  customPermissions Json             @default("{}") @map("custom_permissions") @db.JsonB
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  user   User    @relation(fields: [userId], references: [id])
+  tenant Tenant  @relation(fields: [tenantId], references: [id])
+  agency Agency? @relation(fields: [agencyId], references: [id])
+  client Client? @relation(fields: [clientId], references: [id])
+  roleRef Role?  @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, tenantId, agencyId, clientId])
+  @@index([userId])
+  @@index([tenantId])
+  @@index([role])
+  @@map("memberships")
+}
+
+// ─── MODULES & BILLING ───────────────────────────────────
+
+model Module {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         ModuleKey    @unique
+  name        String       @db.VarChar(255)
+  nameAr      String?      @map("name_ar") @db.VarChar(255)
+  description String?
+  status      ModuleStatus @default(ACTIVE)
+  basePrice   Decimal?     @map("base_price") @db.Decimal(10, 2)
+  icon        String?
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  tenantModules TenantModule[]
+  subscriptions Subscription[]
+  planModules   PlanModule[]
+
+  @@map("modules")
+}
+
+model TenantModule {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String             @map("tenant_id") @db.Uuid
+  moduleId    String             @map("module_id") @db.Uuid
+  status      TenantModuleStatus @default(TRIAL)
+  limits      Json               @default("{}") @db.JsonB
+  settings    Json               @default("{}") @db.JsonB
+  trialEndsAt DateTime?          @map("trial_ends_at")
+  activatedAt DateTime?          @map("activated_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  tenant  Tenant @relation(fields: [tenantId], references: [id])
+  module  Module @relation(fields: [moduleId], references: [id])
+
+  @@unique([tenantId, moduleId])
+  @@index([tenantId])
+  @@map("tenant_modules")
+}
+
+model Plan {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String          @db.VarChar(255)
+  displayName     String          @map("display_name") @db.VarChar(255)
+  displayNameAr   String?         @map("display_name_ar") @db.VarChar(255)
+  description     String?
+  billingInterval BillingInterval
+  price           Decimal         @db.Decimal(10, 2)
+  currency        String          @default("USD") @db.VarChar(3)
+  features        Json            @default("[]") @db.JsonB
+  limits          Json            @default("{}") @db.JsonB
+  status          PlanStatus      @default(ACTIVE)
+  isPopular       Boolean         @default(false) @map("is_popular")
+  sortOrder       Int             @default(0) @map("sort_order")
+  stripePriceId   String?         @map("stripe_price_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+  planModules   PlanModule[]
+
+  @@map("plans")
+}
+
+model PlanModule {
+  planId   String @map("plan_id") @db.Uuid
+  moduleId String @map("module_id") @db.Uuid
+  limits   Json   @default("{}") @db.JsonB
+
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([planId, moduleId])
+  @@map("plan_modules")
+}
+
+model Subscription {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId               String             @map("tenant_id") @db.Uuid
+  planId                 String             @map("plan_id") @db.Uuid
+  moduleId               String?            @map("module_id") @db.Uuid
+  provider               BillingProvider    @default(STRIPE)
+  providerSubscriptionId String?            @map("provider_subscription_id")
+  providerCustomerId     String?            @map("provider_customer_id")
+  status                 SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart     DateTime           @map("current_period_start")
+  currentPeriodEnd       DateTime           @map("current_period_end")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt             DateTime?          @map("canceled_at")
+  trialStart             DateTime?          @map("trial_start")
+  trialEnd               DateTime?          @map("trial_end")
+  metadata               Json               @default("{}") @db.JsonB
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  plan     Plan      @relation(fields: [planId], references: [id])
+  module   Module?   @relation(fields: [moduleId], references: [id])
+  invoices Invoice[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([providerSubscriptionId])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String        @map("tenant_id") @db.Uuid
+  subscriptionId    String?       @map("subscription_id") @db.Uuid
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("USD") @db.VarChar(3)
+  status            InvoiceStatus @default(OPEN)
+  providerInvoiceId String?       @map("provider_invoice_id")
+  invoiceUrl        String?       @map("invoice_url")
+  pdfUrl            String?       @map("pdf_url")
+  lineItems         Json          @default("[]") @db.JsonB
+  issuedAt          DateTime      @map("issued_at")
+  dueAt             DateTime?     @map("due_at")
+  paidAt            DateTime?     @map("paid_at")
+  metadata          Json          @default("{}") @db.JsonB
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("invoices")
+}
+
+// ─── AUDIT & FILES ────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  action      String   @db.VarChar(200)
+  entityType  String?  @map("entity_type") @db.VarChar(100)
+  entityId    String?  @map("entity_id") @db.Uuid
+  oldValues   Json?    @map("old_values") @db.JsonB
+  newValues   Json?    @map("new_values") @db.JsonB
+  metadata    Json     @default("{}") @db.JsonB
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+  userAgent   String?  @map("user_agent")
+  severity    String   @default("info") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor  User?   @relation("ActorAuditLogs", fields: [actorUserId], references: [id])
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([actorUserId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model File {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  clientId     String?    @map("client_id") @db.Uuid
+  uploadedBy   String     @map("uploaded_by") @db.Uuid
+  moduleKey    ModuleKey?
+  filename     String     @db.VarChar(500)
+  originalName String     @map("original_name") @db.VarChar(500)
+  mimeType     String     @map("mime_type") @db.VarChar(200)
+  size         BigInt
+  storageKey   String     @map("storage_key")
+  storageUrl   String?    @map("storage_url")
+  status       FileStatus @default(PENDING)
+  scanStatus   String?    @map("scan_status") @db.VarChar(50)
+  metadata     Json       @default("{}") @db.JsonB
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  client           Client?           @relation(fields: [clientId], references: [id])
+  uploader         User              @relation(fields: [uploadedBy], references: [id])
+  amazonUploads    AmazonUpload[]
+  reportingDatasets ReportingDataset[]
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([moduleKey])
+  @@map("files")
+}
+
+// ─── AI LAYER ─────────────────────────────────────────────
+
+model AIRequest {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String          @map("tenant_id") @db.Uuid
+  userId       String          @map("user_id") @db.Uuid
+  moduleKey    ModuleKey
+  provider     AIProvider
+  model        String          @db.VarChar(100)
+  inputTokens  Int             @default(0) @map("input_tokens")
+  outputTokens Int             @default(0) @map("output_tokens")
+  totalTokens  Int             @default(0) @map("total_tokens")
+  costUsd      Decimal         @default(0) @map("cost_usd") @db.Decimal(10, 6)
+  status       AIRequestStatus @default(PENDING)
+  durationMs   Int?            @map("duration_ms")
+  errorMessage String?         @map("error_message")
+  metadata     Json            @default("{}") @db.JsonB
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([moduleKey])
+  @@index([createdAt])
+  @@map("ai_requests")
+}
+
+// ─── REPORTS ──────────────────────────────────────────────
+
+model Report {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String       @map("tenant_id") @db.Uuid
+  clientId   String?      @map("client_id") @db.Uuid
+  moduleKey  ModuleKey
+  title      String       @db.VarChar(500)
+  reportType String       @map("report_type") @db.VarChar(100)
+  status     ReportStatus @default(PENDING)
+  data       Json         @default("{}") @db.JsonB
+  summary    String?
+  fileUrl    String?      @map("file_url")
+  createdBy  String       @map("created_by") @db.Uuid
+  metadata   Json         @default("{}") @db.JsonB
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  client  Client? @relation(fields: [clientId], references: [id])
+  creator User    @relation(fields: [createdBy], references: [id])
+
+  @@index([tenantId])
+  @@index([moduleKey])
+  @@map("reports")
+}
+
+model Notification {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  title     String           @db.VarChar(500)
+  body      String
+  type      NotificationType @default(INFO)
+  actionUrl String?          @map("action_url")
+  metadata  Json             @default("{}") @db.JsonB
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId])
+  @@index([readAt])
+  @@map("notifications")
+}
+
+model Integration {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId             String              @map("tenant_id") @db.Uuid
+  provider             IntegrationProvider
+  status               IntegrationStatus   @default(DISCONNECTED)
+  credentialsEncrypted String?             @map("credentials_encrypted")
+  settings             Json                @default("{}") @db.JsonB
+  lastSyncAt           DateTime?           @map("last_sync_at")
+  errorMessage         String?             @map("error_message")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, provider])
+  @@map("integrations")
+}
+
+// ─── MODULE: CONTENT AI ───────────────────────────────────
+
+model ContentProject {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  clientId    String?  @map("client_id") @db.Uuid
+  name        String   @db.VarChar(500)
+  description String?
+  brandVoice  Json     @default("{}") @map("brand_voice") @db.JsonB
+  audience    Json     @default("{}") @db.JsonB
+  platforms   Json     @default("[]") @db.JsonB
+  languages   Json     @default("[\"ar\"]") @db.JsonB
+  status      String   @default("active") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  client       Client?       @relation(fields: [clientId], references: [id])
+  contentItems ContentItem[]
+
+  @@index([tenantId])
+  @@map("content_projects")
+}
+
+model ContentItem {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId   String            @map("project_id") @db.Uuid
+  createdBy   String            @map("created_by") @db.Uuid
+  type        ContentItemType
+  platform    String?           @db.VarChar(100)
+  title       String            @db.VarChar(500)
+  body        String
+  hashtags    Json              @default("[]") @db.JsonB
+  mediaUrls   Json              @default("[]") @map("media_urls") @db.JsonB
+  status      ContentItemStatus @default(DRAFT)
+  scheduledAt DateTime?         @map("scheduled_at")
+  publishedAt DateTime?         @map("published_at")
+  aiGenerated Boolean           @default(false) @map("ai_generated")
+  metadata    Json              @default("{}") @db.JsonB
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  project ContentProject @relation(fields: [projectId], references: [id])
+  creator User           @relation(fields: [createdBy], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("content_items")
+}
+
+// ─── MODULE: AMAZON AI ────────────────────────────────────
+
+model AmazonAccount {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  clientId    String       @map("client_id") @db.Uuid
+  marketplace String       @db.VarChar(50)
+  sellerName  String       @map("seller_name") @db.VarChar(500)
+  sellerId    String?      @map("seller_id") @db.VarChar(100)
+  status      TenantStatus @default(ACTIVE)
+  settings    Json         @default("{}") @db.JsonB
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  client        Client         @relation(fields: [clientId], references: [id])
+  amazonUploads AmazonUpload[]
+  amazonMetrics AmazonMetric[]
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("amazon_accounts")
+}
+
+model AmazonUpload {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amazonAccountId String           @map("amazon_account_id") @db.Uuid
+  fileId          String           @map("file_id") @db.Uuid
+  reportType      AmazonReportType @map("report_type")
+  dateRangeStart  DateTime?        @map("date_range_start")
+  dateRangeEnd    DateTime?        @map("date_range_end")
+  status          FileStatus       @default(PENDING)
+  parsedData      Json?            @map("parsed_data") @db.JsonB
+  parseErrors     Json?            @map("parse_errors") @db.JsonB
+  rowCount        Int?             @map("row_count")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id])
+  file          File          @relation(fields: [fileId], references: [id])
+
+  @@index([amazonAccountId])
+  @@map("amazon_uploads")
+}
+
+model AmazonMetric {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  amazonAccountId String        @map("amazon_account_id") @db.Uuid
+  date            DateTime      @db.Date
+  asin            String?       @db.VarChar(20)
+  sku             String?       @db.VarChar(200)
+  metricKey       String        @map("metric_key") @db.VarChar(200)
+  metricValue     Decimal       @map("metric_value") @db.Decimal(20, 6)
+  currency        String?       @db.VarChar(3)
+  metadata        Json          @default("{}") @db.JsonB
+
+  amazonAccount AmazonAccount @relation(fields: [amazonAccountId], references: [id])
+
+  @@index([amazonAccountId, date])
+  @@index([asin])
+  @@index([metricKey])
+  @@map("amazon_metrics")
+}
+
+// ─── MODULE: BUSINESS AI ─────────────────────────────────
+
+model BusinessContact {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String        @map("tenant_id") @db.Uuid
+  clientId  String?       @map("client_id") @db.Uuid
+  name      String        @db.VarChar(500)
+  email     String?       @db.VarChar(320)
+  phone     String?       @db.VarChar(50)
+  company   String?       @db.VarChar(500)
+  type      ContactType   @default(LEAD)
+  status    ContactStatus @default(ACTIVE)
+  tags      Json          @default("[]") @db.JsonB
+  notes     String?
+  metadata  Json          @default("{}") @db.JsonB
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id])
+  client  Client?        @relation(fields: [clientId], references: [id])
+  deals   BusinessDeal[]
+
+  @@index([tenantId])
+  @@index([type])
+  @@map("business_contacts")
+}
+
+model BusinessDeal {
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String     @map("tenant_id") @db.Uuid
+  contactId         String     @map("contact_id") @db.Uuid
+  title             String     @db.VarChar(500)
+  value             Decimal?   @db.Decimal(15, 2)
+  currency          String     @default("USD") @db.VarChar(3)
+  stage             DealStage  @default(LEAD)
+  probability       Int        @default(0)
+  expectedCloseDate DateTime?  @map("expected_close_date")
+  closedAt          DateTime?  @map("closed_at")
+  ownerUserId       String     @map("owner_user_id") @db.Uuid
+  notes             String?
+  metadata          Json       @default("{}") @db.JsonB
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id])
+  contact BusinessContact @relation(fields: [contactId], references: [id])
+  owner   User            @relation("OwnedDeals", fields: [ownerUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([stage])
+  @@map("business_deals")
+}
+
+model BusinessTask {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  assignedTo  String?      @map("assigned_to") @db.Uuid
+  title       String       @db.VarChar(500)
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?    @map("due_date")
+  completedAt DateTime?    @map("completed_at")
+  entityType  String?      @map("entity_type") @db.VarChar(50)
+  entityId    String?      @map("entity_id") @db.Uuid
+  metadata    Json         @default("{}") @db.JsonB
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  assignee User?  @relation("AssignedTasks", fields: [assignedTo], references: [id])
+
+  @@index([tenantId])
+  @@index([assignedTo])
+  @@index([status])
+  @@map("business_tasks")
+}
+
+// ─── MODULE: SCHOOL AI ───────────────────────────────────
+
+model SchoolStudent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  clientId    String    @map("client_id") @db.Uuid
+  fullName    String    @map("full_name") @db.VarChar(500)
+  studentCode String?   @map("student_code") @db.VarChar(50)
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  gender      Gender?
+  grade       String?   @db.VarChar(100)
+  classRoom   String?   @map("class_room") @db.VarChar(100)
+  status      String    @default("active") @db.VarChar(50)
+  enrolledAt  DateTime? @map("enrolled_at")
+  metadata    Json      @default("{}") @db.JsonB
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id])
+  client     Client             @relation(fields: [clientId], references: [id])
+  guardians  SchoolGuardian[]
+  attendance SchoolAttendance[]
+  payments   SchoolPayment[]
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("school_students")
+}
+
+model SchoolGuardian {
+  id           String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String  @map("tenant_id") @db.Uuid
+  studentId    String  @map("student_id") @db.Uuid
+  fullName     String  @map("full_name") @db.VarChar(500)
+  phone        String  @db.VarChar(50)
+  email        String? @db.VarChar(320)
+  relationship String  @db.VarChar(100)
+  isPrimary    Boolean @default(false) @map("is_primary")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  student SchoolStudent @relation(fields: [studentId], references: [id])
+
+  @@index([studentId])
+  @@map("school_guardians")
+}
+
+model SchoolAttendance {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  studentId String           @map("student_id") @db.Uuid
+  date      DateTime         @db.Date
+  status    AttendanceStatus
+  checkInAt DateTime?        @map("check_in_at")
+  notes     String?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  student SchoolStudent @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, date])
+  @@index([tenantId, date])
+  @@map("school_attendance")
+}
+
+model SchoolPayment {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String        @map("tenant_id") @db.Uuid
+  studentId   String        @map("student_id") @db.Uuid
+  amount      Decimal       @db.Decimal(10, 2)
+  paidAmount  Decimal       @default(0) @map("paid_amount") @db.Decimal(10, 2)
+  currency    String        @default("USD") @db.VarChar(3)
+  description String?
+  status      PaymentStatus @default(UNPAID)
+  dueDate     DateTime      @map("due_date") @db.Date
+  paidAt      DateTime?     @map("paid_at")
+  metadata    Json          @default("{}") @db.JsonB
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  student SchoolStudent @relation(fields: [studentId], references: [id])
+
+  @@index([tenantId])
+  @@index([studentId])
+  @@index([status])
+  @@map("school_payments")
+}
+
+// ─── MODULE: REPORTING AI ────────────────────────────────
+
+model ReportingDataset {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  fileId         String     @map("file_id") @db.Uuid
+  name           String     @db.VarChar(500)
+  description    String?
+  schema         Json       @default("{}") @db.JsonB
+  parsedRowCount Int?       @map("parsed_rows_count")
+  status         FileStatus @default(PENDING)
+  aiInsights     Json?      @map("ai_insights") @db.JsonB
+  metadata       Json       @default("{}") @db.JsonB
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  file   File   @relation(fields: [fileId], references: [id])
+
+  @@index([tenantId])
+  @@map("reporting_datasets")
+}
+
+model ReportingDashboard {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  title     String   @db.VarChar(500)
+  titleAr   String?  @map("title_ar") @db.VarChar(500)
+  config    Json     @default("{}") @db.JsonB
+  isPublic  Boolean  @default(false) @map("is_public")
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant  Tenant @relation(fields: [tenantId], references: [id])
+  creator User   @relation(fields: [createdBy], references: [id])
+
+  @@index([tenantId])
+  @@map("reporting_dashboards")
+}
