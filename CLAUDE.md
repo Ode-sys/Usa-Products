@@ -5,6 +5,19 @@
 
 ---
 
+## 📌 مؤجل — عند الجهاز الجديد
+
+**GBrain** — طبقة ذاكرة دائمة للـ AI agents (28.8k ⭐)
+- الرابط: https://github.com/garrytan/gbrain
+- ماذا يفعل: يحفظ المعرفة بين الجلسات — Vector + Graph + Synthesis
+- يحتاج: Bun + PostgreSQL/pgvector أو PGLite محلي
+- وقت الإعداد: 15-30 دقيقة
+- **ذكّر المستخدم بتثبيته عند ذكر "جهاز جديد" أو "إعداد بيئة جديدة"**
+
+---
+
+---
+
 ## قواعد الأولوية
 
 1. **لا تبدأ تنفيذ أي ميزة معقدة** قبل تفعيل `planner` ثم `architect`
@@ -229,7 +242,7 @@ skill: agent-eval              ← تقييم أداء الوكلاء
 ## جدول المهام السريعة
 
 | المستخدم يقول | المسار التلقائي |
-|--------------|-----------------|
+|--------------|------------------|
 | "اعمل ميزة X" | planner → architect → tdd-guide → [lang] → code-reviewer |
 | "في خطأ في البناء" | systematic-debugging → build-error-resolver → [lang-resolver] |
 | "رفعت ملف Amazon" | amazon-upload-parser → [skill مناسب] |
@@ -291,3 +304,7 @@ PARALLEL {
 
 Odé AI Platform — Amazon AI Module (أصلي 100%)
 لا يُستخدم أي كود من مصادر AGPL — كل المهارات الأمازونية مكتوبة من الصفر.
+# userEmail
+The user's email address is mr.mohammadodeh1980@gmail.com. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.
+# currentDate
+Today's date is 2026-08-20.
